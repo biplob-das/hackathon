@@ -1,6 +1,10 @@
 <?php
 session_start();
 include 'db_connect.php';
+require_once 'mental_health_analyzer.php';
+
+// Initialize mental health analyzer
+$mentalHealthAnalyzer = new MentalHealthAnalyzer();
 
 // Mock AI Roadmap Generator
 function generateRoadmap($tasks) {
@@ -37,6 +41,20 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'tasks' && isset($_SESSION['user_i
     $tasks = $pdo->query("SELECT * FROM tasks WHERE user_id = " . $_SESSION['user_id'] . " AND date BETWEEN '2025-09-01' AND '2025-09-30'")->fetchAll(PDO::FETCH_ASSOC);
     header('Content-Type: application/json');
     echo json_encode($tasks);
+    exit;
+}
+
+// Handle AJAX request for mental health analysis
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'analyze_diary' && isset($_SESSION['user_id'])) {
+    $content = $_POST['content'] ?? '';
+    if (!empty($content)) {
+        $analysis = $mentalHealthAnalyzer->analyzeDiaryContent($content, $_SESSION['user_id']);
+        header('Content-Type: application/json');
+        echo json_encode($analysis);
+    } else {
+        http_response_code(400);
+        echo json_encode(['error' => 'Content is required']);
+    }
     exit;
 }
 
@@ -223,8 +241,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_task'])) {
     header("Location: index.php");
     exit;
 } elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_diary'])) {
+    $content = $_POST['content'];
+    
+    // Add diary entry
     $stmt = $pdo->prepare("INSERT INTO diaries (user_id, content) VALUES (?, ?)");
-    $stmt->execute([$_SESSION['user_id'], $_POST['content']]);
+    $stmt->execute([$_SESSION['user_id'], $content]);
+    
+    // Check if mental health analysis is enabled for this user
+    $stmt = $pdo->prepare("SELECT enable_analysis FROM user_mental_health_settings WHERE user_id = ?");
+    $stmt->execute([$_SESSION['user_id']]);
+    $settings = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    // If analysis is enabled (default is true), analyze the diary content
+    if (!$settings || $settings['enable_analysis']) {
+        try {
+            $mentalHealthAnalyzer->analyzeDiaryContent($content, $_SESSION['user_id']);
+        } catch (Exception $e) {
+            // Log error but don't interrupt user flow
+            error_log("Mental health analysis failed: " . $e->getMessage());
+        }
+    }
+    
     header("Location: index.php");
     exit;
 } elseif (isset($_GET['logout'])) {
@@ -243,6 +280,16 @@ $roadmap = generateRoadmap($tasks);
 // Fetch diary entries for the current user
 $diaries = $pdo->query("SELECT * FROM diaries WHERE user_id = " . $_SESSION['user_id'] . " ORDER BY date DESC LIMIT 5")->fetchAll(PDO::FETCH_ASSOC);
 
+// Get mental health alerts
+$stmt = $pdo->prepare("SELECT * FROM crisis_alerts WHERE user_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 3");
+$stmt->execute([$_SESSION['user_id']]);
+$mentalHealthAlerts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get urgent notifications
+$stmt = $pdo->prepare("SELECT * FROM notifications WHERE user_id = ? AND priority IN ('high', 'urgent') AND is_read = 0 ORDER BY created_at DESC LIMIT 5");
+$stmt->execute([$_SESSION['user_id']]);
+$urgentNotifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
 // Prepare tasks by date for calendar
 $tasks_by_date = [];
 foreach ($tasks as $task) {
@@ -260,6 +307,28 @@ foreach ($tasks as $task) {
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <script src="script.js"></script>
     <link rel="stylesheet" href="styles.css">
+    <style>
+        .crisis-alert {
+            background: linear-gradient(90deg, #fef2f2, #fee2e2);
+            border-left: 4px solid #ef4444;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.8; }
+        }
+        .mental-health-indicator {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        .risk-low { background-color: #10b981; }
+        .risk-moderate { background-color: #f59e0b; }
+        .risk-high { background-color: #ef4444; }
+    </style>
 </head>
 <body class="bg-gray-100 font-sans flex h-screen">
     <nav class="w-64 bg-purple-800 text-white p-4 space-y-2">
@@ -267,10 +336,18 @@ foreach ($tasks as $task) {
         <ul class="space-y-2">
             <li class="hover:bg-purple-700 p-2 rounded cursor-pointer" data-section="calendar">Calendar</li>
             <li class="hover:bg-purple-700 p-2 rounded cursor-pointer" data-section="todo">To-Do</li>
-            <li class="hover:bg-purple-700 p-2 rounded cursor-pointer" data-section="diary">Diary</li>
+            <li class="hover:bg-purple-700 p-2 rounded cursor-pointer" data-section="diary">
+                Diary
+                <?php if (!empty($mentalHealthAlerts)): ?>
+                <span class="mental-health-indicator risk-high" title="Mental health alert active"></span>
+                <?php endif; ?>
+            </li>
             <li class="hover:bg-purple-700 p-2 rounded cursor-pointer" data-section="friends">Friends Feed</li>
             <li class="hover:bg-purple-700 p-2 rounded cursor-pointer" data-section="roadmap">Learning Roadmap</li>
             <li class="hover:bg-purple-700 p-2 rounded cursor-pointer" data-section="gamification">Gamification</li>
+            <li class="hover:bg-purple-700 p-2 rounded cursor-pointer">
+                <a href="mental_health_dashboard.php" class="block">Mental Health</a>
+            </li>
         </ul>
         <div class="mt-auto">
             <p class="text-sm">Welcome, <?php echo htmlspecialchars($user['username']); ?>! <a href="?logout=1" class="underline">Logout</a></p>
@@ -278,6 +355,32 @@ foreach ($tasks as $task) {
     </nav>
 
     <main class="flex-1 p-6 overflow-y-auto">
+        <!-- Mental Health Alerts -->
+        <?php if (!empty($mentalHealthAlerts)): ?>
+        <div class="crisis-alert p-4 rounded-lg shadow mb-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3 class="text-lg font-bold text-red-800">🚨 Mental Health Alert</h3>
+                    <p class="text-red-700">We've detected concerning patterns in your recent diary entries.</p>
+                    <p class="text-sm text-red-600">If you're in crisis, please call <?php echo CRISIS_HOTLINE; ?> immediately.</p>
+                </div>
+                <a href="mental_health_dashboard.php" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">
+                    View Details
+                </a>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <!-- Urgent Notifications -->
+        <?php if (!empty($urgentNotifications)): ?>
+        <div class="bg-orange-100 border border-orange-400 text-orange-700 px-4 py-3 rounded mb-4">
+            <h4 class="font-bold">Important Notifications:</h4>
+            <?php foreach ($urgentNotifications as $notification): ?>
+            <p class="text-sm"><?php echo htmlspecialchars($notification['message']); ?></p>
+            <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
+
         <section id="calendar" class="bg-white p-4 rounded-lg shadow">
             <h2 class="text-lg font-semibold text-purple-800 mb-2">Calendar - September 2025</h2>
             <div class="grid grid-cols-7 gap-1 text-center">
@@ -380,17 +483,42 @@ foreach ($tasks as $task) {
 
         <section id="diary" class="bg-white p-4 rounded-lg shadow hidden">
             <h2 class="text-lg font-semibold text-purple-800 mb-2">Personal Diary</h2>
-            <form method="post">
+            
+            <!-- Mental Health Analysis Status -->
+            <div id="analysis-status" class="mb-4 p-3 rounded-lg bg-blue-50 hidden">
+                <p class="text-blue-800 text-sm">
+                    <span id="analysis-message">Your diary entry is being analyzed for mental health insights...</span>
+                </p>
+            </div>
+            
+            <form method="post" id="diary-form">
                 <input type="hidden" name="add_diary" value="1">
-                <textarea name="content" placeholder="Write your thoughts..." class="w-full p-2 border rounded h-32"></textarea>
-                <button type="submit" class="mt-2 bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700">Save</button>
+                <textarea name="content" id="diary-content" placeholder="Write your thoughts..." class="w-full p-2 border rounded h-32"></textarea>
+                <div class="flex justify-between items-center mt-2">
+                    <button type="submit" class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700">Save</button>
+                    <button type="button" id="analyze-btn" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+                        Analyze Mental Health
+                    </button>
+                </div>
             </form>
+            
             <h3 class="mt-4 text-md font-semibold text-purple-800">Previous Entries</h3>
             <ul class="space-y-2 mt-2">
                 <?php foreach ($diaries as $diary): ?>
-                <li class="text-gray-700"><?php echo htmlspecialchars($diary['content']); ?> (<?php echo (new DateTime($diary['date']))->format('Y-m-d H:i'); ?>)</li>
+                <li class="relative p-2 border rounded">
+                    <p class="text-gray-700"><?php echo htmlspecialchars($diary['content']); ?></p>
+                    <p class="text-xs text-gray-500 mt-1"><?php echo (new DateTime($diary['date']))->format('Y-m-d H:i'); ?></p>
+                </li>
                 <?php endforeach; ?>
             </ul>
+            
+            <div class="mt-4 p-3 bg-gray-50 rounded-lg">
+                <p class="text-sm text-gray-600">
+                    <strong>Privacy Note:</strong> Your diary entries may be analyzed using AI to provide mental health insights. 
+                    This analysis is kept private and is used only to help identify when you might benefit from additional support. 
+                    <a href="mental_health_dashboard.php" class="text-purple-600 underline">Manage settings</a>
+                </p>
+            </div>
         </section>
 
         <section id="gamification" class="bg-white p-4 rounded-lg shadow hidden">
@@ -399,5 +527,79 @@ foreach ($tasks as $task) {
             <p class="text-gray-700">Level <?php echo $user['level']; ?></p>
         </section>
     </main>
+
+    <script>
+        // Mental health analysis functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const analyzeBtn = document.getElementById('analyze-btn');
+            const analysisStatus = document.getElementById('analysis-status');
+            const analysisMessage = document.getElementById('analysis-message');
+            const diaryContent = document.getElementById('diary-content');
+
+            if (analyzeBtn) {
+                analyzeBtn.addEventListener('click', async function() {
+                    const content = diaryContent.value.trim();
+                    
+                    if (!content) {
+                        alert('Please write something in your diary first.');
+                        return;
+                    }
+
+                    // Show analysis status
+                    analysisStatus.classList.remove('hidden');
+                    analysisMessage.textContent = 'Analyzing your diary entry for mental health insights...';
+                    analyzeBtn.disabled = true;
+                    analyzeBtn.textContent = 'Analyzing...';
+
+                    try {
+                        const formData = new FormData();
+                        formData.append('content', content);
+
+                        const response = await fetch('index.php?ajax=analyze_diary', {
+                            method: 'POST',
+                            body: formData
+                        });
+
+                        if (!response.ok) {
+                            throw new Error('Analysis failed');
+                        }
+
+                        const analysis = await response.json();
+                        
+                        // Display results
+                        analysisMessage.innerHTML = `
+                            <strong>Mental Health Analysis Complete:</strong><br>
+                            Depression Level: ${analysis.depression_level}/10<br>
+                            Suicide Risk: ${analysis.suicide_risk_level}/10<br>
+                            Urgency: ${analysis.urgency}<br>
+                            <a href="mental_health_dashboard.php" class="text-blue-600 underline">View detailed analysis</a>
+                        `;
+
+                        // Change background color based on urgency
+                        analysisStatus.className = 'mb-4 p-3 rounded-lg ';
+                        if (analysis.urgency === 'critical' || analysis.urgency === 'high') {
+                            analysisStatus.className += 'bg-red-50 border border-red-200';
+                            analysisMessage.classList.add('text-red-800');
+                        } else if (analysis.urgency === 'moderate') {
+                            analysisStatus.className += 'bg-yellow-50 border border-yellow-200';
+                            analysisMessage.classList.add('text-yellow-800');
+                        } else {
+                            analysisStatus.className += 'bg-green-50 border border-green-200';
+                            analysisMessage.classList.add('text-green-800');
+                        }
+
+                    } catch (error) {
+                        console.error('Analysis error:', error);
+                        analysisMessage.innerHTML = '<strong>Analysis failed.</strong> Please try again later.';
+                        analysisStatus.className = 'mb-4 p-3 rounded-lg bg-red-50 border border-red-200';
+                        analysisMessage.classList.add('text-red-800');
+                    } finally {
+                        analyzeBtn.disabled = false;
+                        analyzeBtn.textContent = 'Analyze Mental Health';
+                    }
+                });
+            }
+        });
+    </script>
 </body>
 </html>
