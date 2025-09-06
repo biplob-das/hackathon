@@ -42,6 +42,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'tasks' && isset($_SESSION['user_i
 
 // Handle Requests
 if (!isset($_SESSION['user_id'])) {
+    $error = '';
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
         $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ? AND password = ?");
         $stmt->execute([$_POST['username'], $_POST['password']]); // Hash in prod
@@ -50,6 +51,8 @@ if (!isset($_SESSION['user_id'])) {
             $_SESSION['user_id'] = $user['id'];
             header("Location: index.php");
             exit;
+        } else {
+            $error = 'Invalid username or password';
         }
     } elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['signup'])) {
         $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ?");
@@ -60,12 +63,144 @@ if (!isset($_SESSION['user_id'])) {
             $_SESSION['user_id'] = $pdo->lastInsertId();
             header("Location: index.php");
             exit;
+        } else {
+            $error = 'Username already exists';
         }
     }
-    echo '<!DOCTYPE html><html><body>';
-    echo '<form method="post"><input type="text" name="username" placeholder="Username" required><input type="password" name="password" placeholder="Password" required><input type="submit" name="login" value="Login" class="bg-blue-500 text-white px-4 py-2 rounded"></form>';
-    echo '<form method="post"><input type="text" name="username" placeholder="Username" required><input type="password" name="password" placeholder="Password" required><input type="submit" name="signup" value="Signup" class="bg-green-500 text-white px-4 py-2 rounded"></form>';
-    echo '</body></html>';
+    ?>
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Productivity Hub - Login</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <style>
+            body {
+                background: linear-gradient(135deg, #6B46C1, #B794F4);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+                margin: 0;
+                font-family: 'Arial', sans-serif;
+            }
+            .login-container {
+                background: white;
+                padding: 2rem;
+                border-radius: 15px;
+                box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+                width: 100%;
+                max-width: 400px;
+                transition: transform 0.3s ease;
+            }
+            .login-container:hover {
+                transform: translateY(-5px);
+            }
+            .login-container h2 {
+                color: #6B46C1;
+                text-align: center;
+                margin-bottom: 1.5rem;
+                font-size: 1.8rem;
+                font-weight: bold;
+            }
+            .login-container input {
+                width: 100%;
+                padding: 0.75rem;
+                margin: 0.5rem 0;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                font-size: 1rem;
+                transition: border-color 0.3s ease;
+            }
+            .login-container input:focus {
+                outline: none;
+                border-color: #6B46C1;
+                box-shadow: 0 0 5px rgba(107, 70, 193, 0.3);
+            }
+            .login-container button {
+                width: 100%;
+                padding: 0.75rem;
+                margin: 0.5rem 0;
+                border: none;
+                border-radius: 8px;
+                font-size: 1rem;
+                cursor: pointer;
+                transition: background-color 0.3s ease, transform 0.2s ease;
+            }
+            .login-container button:hover {
+                transform: translateY(-2px);
+            }
+            .login-button {
+                background-color: #6B46C1;
+                color: white;
+            }
+            .login-button:hover {
+                background-color: #553C9A;
+            }
+            .signup-button {
+                background-color: #48BB78;
+                color: white;
+            }
+            .signup-button:hover {
+                background-color: #38A169;
+            }
+            .error {
+                color: #E53E3E;
+                text-align: center;
+                margin-bottom: 1rem;
+                font-size: 0.9rem;
+            }
+            .toggle-form {
+                text-align: center;
+                margin-top: 1rem;
+                color: #6B46C1;
+                cursor: pointer;
+                text-decoration: underline;
+            }
+            .toggle-form:hover {
+                color: #553C9A;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="login-container">
+            <h2 id="form-title">Login to Productivity Hub</h2>
+            <?php if ($error): ?>
+                <p class="error"><?php echo htmlspecialchars($error); ?></p>
+            <?php endif; ?>
+            <form id="login-form" method="post">
+                <input type="text" name="username" placeholder="Username" required>
+                <input type="password" name="password" placeholder="Password" required>
+                <button type="submit" name="login" class="login-button">Login</button>
+                <p class="toggle-form" onclick="toggleForm('signup')">Don't have an account? Sign up</p>
+            </form>
+            <form id="signup-form" method="post" style="display: none;">
+                <input type="text" name="username" placeholder="Username" required>
+                <input type="password" name="password" placeholder="Password" required>
+                <button type="submit" name="signup" class="signup-button">Sign Up</button>
+                <p class="toggle-form" onclick="toggleForm('login')">Already have an account? Login</p>
+            </form>
+        </div>
+        <script>
+            function toggleForm(form) {
+                const loginForm = document.getElementById('login-form');
+                const signupForm = document.getElementById('signup-form');
+                const title = document.getElementById('form-title');
+                if (form === 'signup') {
+                    loginForm.style.display = 'none';
+                    signupForm.style.display = 'block';
+                    title.textContent = 'Sign Up for Productivity Hub';
+                } else {
+                    loginForm.style.display = 'block';
+                    signupForm.style.display = 'none';
+                    title.textContent = 'Login to Productivity Hub';
+                }
+            }
+        </script>
+    </body>
+    </html>
+    <?php
     exit;
 }
 
