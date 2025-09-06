@@ -1,0 +1,91 @@
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+}
+
+nav {
+    height: 100%;
+    position: fixed;
+    width: 250px;
+    background-color: #6B46C1;
+    color: white;
+    padding: 20px;
+}
+
+nav ul {
+    list-style: none;
+    padding: 0;
+}
+
+nav ul li {
+    padding: 10px;
+    cursor: pointer;
+}
+
+nav ul li:hover {
+    background-color: #553C9A;
+    border-radius: 5px;
+}
+
+main {
+    margin-left: 260px;
+    padding: 20px;
+}
+
+section {
+    background-color: white;
+    padding: 15px;
+    margin-bottom: 20px;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+section h2 {
+    color: #6B46C1;
+    border-bottom: 2px solid #6B46C1;
+    padding-bottom: 5px;
+    margin-bottom: 10px;
+}
+
+button {
+    background-color: #6B46C1;
+    color: white;
+    padding: 5px 10px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #553C9A;
+}
+
+input[type="text"], textarea {
+    width: 100%;
+    padding: 8px;
+    margin: 5px 0;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+.hidden {
+    display: none;
+}
+
+/* Calendar specific styles */
+#calendar .grid-cols-7 div {
+    min-height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#calendar .bg-blue-100 {
+    background-color: #BFDBFE;
+    font-weight: bold;
+}
+
+#diary ul li {
+    padding: 5px;
+    border-bottom: 1px solid #eee;
+}
